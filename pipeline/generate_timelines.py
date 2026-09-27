@@ -79,8 +79,19 @@ def category_input_hash(papers):
 # ═══════════════════════════════════════════
 
 def opus_streaming_call(prompt, max_tokens=12000):
-    """Opus streaming 호출. SDK retry는 request-level만 처리하므로 mid-stream
-    Connection reset/ReadError를 잡아서 수동 retry (exp backoff)."""
+    """Narrative 호출. llm.provider=gemini 이면 Gemini 텍스트, 아니면 Opus streaming.
+
+    SDK retry는 request-level만 처리하므로 mid-stream Connection reset/ReadError를
+    잡아서 수동 retry (exp backoff). Gemini 경로는 키가 없으면 호출 전에 실패한다.
+    """
+    from config_loader import get_llm_settings
+    settings = get_llm_settings()
+    if settings["provider"] == "gemini":
+        from lib.gemini_llm import gemini_generate_text
+        log(f"    [gemini] timeline narrative via {settings['timeline_model']}")
+        return gemini_generate_text(
+            prompt, model=settings["timeline_model"], max_output_tokens=max_tokens,
+        )
     import time as _time
     from anthropic import Anthropic
     client = Anthropic(timeout=600.0, max_retries=4)
@@ -765,6 +776,10 @@ def select_best_candidate(results, caption=""):
     if not results:
         return None
     if len(results) == 1:
+        return results[0]
+    from config_loader import get_llm_settings
+    if get_llm_settings()["provider"] == "gemini":
+        log("     [judge] provider=gemini — Anthropic vision judge skipped; first candidate kept")
         return results[0]
     try:
         import base64

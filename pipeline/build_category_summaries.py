@@ -14,9 +14,8 @@ import json
 import os
 import re
 from collections import defaultdict
-from anthropic import Anthropic
 
-from config_loader import PAPERS_DIR as _PAPERS_DIR, get_topic_dir
+from config_loader import PAPERS_DIR as _PAPERS_DIR, get_topic_dir, get_llm_settings
 PAPERS_DIR = str(_PAPERS_DIR)
 
 def _anthropic_text(resp):
@@ -76,12 +75,20 @@ def _call_with_invariant_gate(prompt, model, max_tokens, label, client,
                 "위 문제를 고치되 같은 규칙을 모두 지켜 다시 작성하세요."
             )
         try:
-            resp = client.messages.create(
-                model=model,
-                max_tokens=max_tokens,
-                messages=[{"role": "user", "content": local_prompt}],
-            )
-            text = _anthropic_text(resp)
+            if get_llm_settings()["provider"] == "gemini":
+                from lib.gemini_llm import gemini_generate_text
+                text = gemini_generate_text(
+                    local_prompt,
+                    model=get_llm_settings()["summary_model"],
+                    max_output_tokens=max_tokens,
+                )
+            else:
+                resp = client.messages.create(
+                    model=model,
+                    max_tokens=max_tokens,
+                    messages=[{"role": "user", "content": local_prompt}],
+                )
+                text = _anthropic_text(resp)
             if text and text[-1] not in ".다":
                 text += "."
         except Exception as e:
@@ -202,7 +209,12 @@ def _run_category_summary(topic="ai4s", *, regen_ko=False, categories=None):
         key = (pc, sc)
         sub_papers[key].append(p)
 
-    client = Anthropic(timeout=180.0, max_retries=4)
+    if get_llm_settings()["provider"] == "gemini":
+        client = None
+        print(f"  [backend] category summaries: Gemini {get_llm_settings()['summary_model']}")
+    else:
+        from anthropic import Anthropic
+        client = Anthropic(timeout=180.0, max_retries=4)
 
     if regen_ko and os.path.exists(sum_path):
         with open(sum_path, "r", encoding="utf-8") as f:

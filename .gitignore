@@ -103,6 +103,11 @@ docs/_local_keys.json
 # Never deployed.
 docs/_zotero_keys.json
 
+# Internal literacy pilot artifacts (HTML/logs/screenshots; no PDFs, no API keys)
+!pilot_artifacts/
+!pilot_artifacts/literacy/
+!pilot_artifacts/literacy/**
+
 # Exclude local config and temp files
 config.json
 __pycache__/

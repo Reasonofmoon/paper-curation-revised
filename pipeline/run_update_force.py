@@ -34,7 +34,7 @@ from datetime import datetime
 from config_loader import (
     PAPERS_DIR as _PAPERS_DIR, PIPELINE_DIR, _ssl_ctx,
     get_zotero_api_key, get_zotero_user_id, get_collection_key, get_collections, get_zotero_dir,
-    get_topic_dir, get_google_key,
+    get_topic_dir, get_google_key, get_llm_settings, get_review_profile,
 )
 from lib.categories import category_slug
 PAPERS_DIR = str(_PAPERS_DIR)
@@ -1330,6 +1330,14 @@ def write_review(item, slug_dir, figures):
     with open(text_path, "r", encoding="utf-8") as f:
         paper_text = f.read()[:15000]
 
+    if get_review_profile(item=item) == "education":
+        from lib.review_education import write_education_review
+        try:
+            return write_education_review(item, slug_dir, figures)
+        except Exception as e:
+            log(f"  review.md failed: {e}")
+            return False
+
     title = item.get("title", "")
     authors = ", ".join(
         f"{c.get('firstName', '')} {c.get('lastName', '')}".strip()
@@ -1344,9 +1352,7 @@ def write_review(item, slug_dir, figures):
         fig_refs += f"\n- Fig {fig['name']}: {fig['caption'][:80]}"
 
     try:
-        from anthropic import Anthropic
-        client = Anthropic(timeout=180.0, max_retries=4)
-
+        settings = get_llm_settings()
         # Tool-use forces a structured JSON response that matches
         # REVIEW_TOOL_SCHEMA. The SDK auto-retries on schema validation
         # failures so we no longer need post-hoc list-literal / figure
@@ -1372,6 +1378,14 @@ def write_review(item, slug_dir, figures):
         cache_dir = paper_cache_dir(slug)
 
         def _make_call():
+            if settings["provider"] == "gemini":
+                from lib.gemini_llm import gemini_generate_json
+                return gemini_generate_json(
+                    prompt, REVIEW_TOOL_SCHEMA["input_schema"],
+                    model=settings["review_model"], max_output_tokens=4000,
+                )
+            from anthropic import Anthropic
+            client = Anthropic(timeout=180.0, max_retries=4)
             response = client.messages.create(
                 model=WRITE_REVIEW_MODEL,
                 max_tokens=4000,
@@ -1386,8 +1400,9 @@ def write_review(item, slug_dir, figures):
                     return dict(block.input)
             raise RuntimeError("emit_review tool was not invoked")
 
+        model_name = settings["review_model"] if settings["provider"] == "gemini" else WRITE_REVIEW_MODEL
         data = cached_call(
-            cache_dir, prompt, WRITE_REVIEW_MODEL, _make_call,
+            cache_dir, prompt, model_name, _make_call,
             schema_version=WRITE_REVIEW_SCHEMA_VERSION,
         )
         data = _salvage_review_data(data)
@@ -1998,6 +2013,7 @@ def main():
                              "retime=regenerate timeline narratives+images only. "
                              "When set, overrides --resume/--skip-existing/--timeline/--category combinations.")
     args = parser.parse_args()
+    os.environ["PAPER_CURATION_TOPIC"] = args.topic
 
     # Apply --mode → legacy flags mapping. Pure translation; no behavior change
     # when --mode is absent (args.mode is None → all legacy flags honored as-is).
