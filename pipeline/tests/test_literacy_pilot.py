@@ -18,6 +18,7 @@ from classify_bib_subtopic import assign_categories, label_for  # noqa: E402
 from lib.gemini_llm import GeminiKeyMissing, require_google_key  # noqa: E402
 from lib.review_education import (  # noqa: E402
     NOT_IN_TEXT,
+    excerpt_for_review,
     placeholder_fields,
     render_education_markdown,
     scrub_guarantees,
@@ -46,6 +47,11 @@ class EducationTemplateTests(unittest.TestCase):
         self.assertIn("근거 강도", text)
         self.assertNotIn("합격을 보장", text)
         self.assertIn("review_status: \"placeholder\"", text)
+
+    def test_excerpt_keeps_a_late_effect_size(self):
+        late = ("intro " * 4000) + "The pooled Cohen's d = 0.41, 95% CI [0.20, 0.62]."
+        excerpt = excerpt_for_review(late, head=2000, window=200, extra=1)
+        self.assertIn("Cohen's d = 0.41", excerpt)
 
     def test_scrub_removes_score_guarantee(self):
         cleaned = scrub_guarantees("이 방법은 점수를 보장한다. 가정 독서는 상관연구이다.")

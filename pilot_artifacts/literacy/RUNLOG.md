@@ -1,0 +1,79 @@
+# RUNLOG — literacy 내부 파일럿
+
+## 기준
+
+- 브랜치: `pilot/literacy`
+- 베이스: 포크 `Reasonofmoon/paper-curation-revised` `master` `4536c043` (`fix: run real citedby deeper research`)
+- 업스트림 스냅샷은 쓰지 않았다. 이 포크에 리뷰 작성(`run_update_force.write_review`), 검색 인덱스, 토픽 HTML이 이미 있어서 파이프라인을 돌릴 수 있었다.
+- 업스트림 `jehyunlee/paper-curation`에는 push/PR/배포하지 않았다.
+- `wrangler`, Cloudflare, GitHub Pages, 메일, Zotero API는 호출하지 않았다.
+- LLM 호출 0회. `GOOGLE_API_KEY` 없음.
+
+## 입력
+
+- CSV 23행, PDF 22개 (CC BY). 업로드 zip.
+- 빠진 1편: id 3, *Comparison of the Impact of Extensive and Intensive Reading…*, DOI `10.7575/aiac.ijalel.v.6n.3p.131`.
+- DOI 랜딩을 한 번 열었다. 최종 URL `https://journals.aiac.org.au/index.php/IJALEL/article/view/3048` 에 PDF 링크가 없어 skip. 리뷰를 만들지 않았다.
+
+## 실행한 명령 (종료 코드 0)
+
+```bash
+PYTHONUTF8=1 python3 pipeline/ingest_pdf_folder.py \
+  --topic literacy \
+  --csv /tmp/pilot-inputs/pilot-23-ccby.csv \
+  --pdf-dir /tmp/pilot-inputs/pdfs
+
+PYTHONUTF8=1 python3 pipeline/build_papers_index.py --topic literacy
+PYTHONUTF8=1 python3 pipeline/classify_bib_subtopic.py --topic literacy
+PYTHONUTF8=1 python3 pipeline/review_to_html.py --topic literacy --all
+PYTHONUTF8=1 python3 pipeline/build_search_index.py \
+  --topic literacy --bm25-only --include-text yes
+SKIP_ZOTERO_KEYS=1 PYTHONUTF8=1 python3 pipeline/build_topic_index.py literacy
+
+PYTHONUTF8=1 python3 pipeline/answer_deep_research.py --topic literacy \
+  --retrieve-only --top-k 8 \
+  --question "Does extensive reading improve English for Korean elementary students?" \
+  --out pilot_artifacts/literacy/deep-research/q1-extensive-reading-korean-elementary.md
+
+PYTHONUTF8=1 python3 pipeline/answer_deep_research.py --topic literacy \
+  --retrieve-only --top-k 8 \
+  --question "Should parents read English books with their kids at home?" \
+  --out pilot_artifacts/literacy/deep-research/q2-parents-read-at-home.md
+
+PYTHONUTF8=1 python3 -m unittest pipeline.tests.test_literacy_pilot
+PYTHONUTF8=1 python3 pipeline/serve_local.py --port 8765 --topic literacy
+```
+
+ingest는 페이지 상한을 80으로 올린 뒤 한 번 더 돌려, 44쪽짜리 다독 메타분석 전문이 `text.md`에 들어가게 했다. 분류·HTML·BM25·토픽 페이지는 그 다음 다시 빌드했다.
+
+## 결과
+
+- 논문 디렉터리 22개. `text.md` + 교육 템플릿 placeholder `review.md` + `index.html`.
+- placeholder는 효과크기를 쓰지 않는다. 학부모 시사점은 `근거 강도: 판정 불가`이고, 합격·점수 보장이 없다.
+- 분류 6개: Extensive Reading, Vocabulary, Reading Comprehension, Phonics and Decoding, Reading Motivation, Home Literacy. primary는 CSV `subtopic`. TF-IDF 코사인이 배경보다 높을 때만 보조 범주 1개. HDBSCAN/SPECTER2/LLM 작명 아님.
+- BM25 인덱스: 논문 22, 청크 187 (리뷰 88 + text.md 99). 임베딩 바이트는 0 벡터 placeholder. 모델 필드 `bm25-only`. API 호출 없음.
+- 질문 1 상위 논문: 한국 초등 EFL 단순 독해 관점(011), 형태소(007), 듣고 읽기 메타분석(010), 가정 문해(018), 다독-어휘 메타분석(002).
+- 질문 2 상위 논문: SPIRE 부모 참여(023), 다독 메타분석(001), 가정 문해(018) 등이 포함된다. BM25라 질문 어휘와 겹치는 다른 논문도 섞인다. 답변 문장은 생성하지 않았다.
+- 로컬 페이지 `http://127.0.0.1:8765/literacy/` HTTP 200. 리뷰 페이지 HTTP 200.
+- 스크린샷: 인덱스(범주 펼침), classic 검색 `extensive reading`, Deep Research 패널(질문만 입력, Enter 없음), 리뷰의 학부모 시사점, 모바일 인덱스.
+
+## 막힌 것
+
+`GOOGLE_API_KEY`가 없어 다음을 호출하지 않았다.
+
+- `ingest_pdf_folder.py --write-reviews` (Gemini 리뷰)
+- `build_category_summaries.py` (Gemini 요약. 지금은 서지 라벨 설명)
+- `generate_timelines.py --narrative-only`
+- `build_search_index.py`의 실제 `gemini-embedding-001` (`--bm25-only`를 뺌)
+- `answer_deep_research.py`의 답변 단계 (`--retrieve-only`를 뺌)
+
+정확한 명령은 `NEXT-STEPS.md`.
+
+## 코드에서 바꾼 점
+
+- `llm.provider=gemini`일 때만 리뷰·타임라인 서술·카테고리 요약이 Gemini다. 기본값은 그대로 Anthropic.
+- `review_profiles.literacy=education` (코드 기본값도 literacy는 education).
+- Zotero 없이 CSV+PDF 폴더 ingest.
+- 교육 리뷰 템플릿과 보장 표현 제거.
+- `--bm25-only`는 임베딩 API를 호출하지 않는다.
+- `literacy/`를 `docs/.assetsignore`에 넣어 로컬 전용으로 둔다.

@@ -49,7 +49,7 @@ def load_rows(csv_path: Path) -> list[dict]:
         return list(csv.DictReader(handle))
 
 
-def extract_pdf_text(pdf_path: Path, title: str, max_pages: int = 40) -> tuple[str, int, bool]:
+def extract_pdf_text(pdf_path: Path, title: str, max_pages: int = 80) -> tuple[str, int, bool]:
     import pymupdf
 
     doc = pymupdf.open(pdf_path)

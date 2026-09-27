@@ -214,8 +214,35 @@ def placeholder_fields(meta: dict, opening_excerpt: str) -> dict:
     }
 
 
+_EFFECT_RE = re.compile(
+    r"(?i)(cohen|hedges|effect size|\bd\s*=|\bg\s*=|95%\s*CI|confidence interval)"
+)
+
+
+def excerpt_for_review(text: str, head: int = 14000, window: int = 3500, extra: int = 3) -> str:
+    """Opening pages plus a few later windows that mention effect sizes.
+
+    A flat 12k-character cut drops the results of long meta-analyses. This
+    stays inside one Gemini call and does not invent numbers.
+    """
+    body = text or ""
+    head_text = body[:head]
+    rest = body[head:]
+    extras = []
+    for match in _EFFECT_RE.finditer(rest):
+        start = max(0, match.start() - 500)
+        end = min(len(rest), match.end() + window)
+        extras.append(rest[start:end])
+        if len(extras) >= extra:
+            break
+    if not extras:
+        return head_text
+    return head_text + "\n\n---\n\n" + "\n\n---\n\n".join(extras)
+
+
 def education_prompt(meta: dict, paper_text: str) -> str:
     authors = ", ".join(meta.get("authors") or [])
+    excerpt = excerpt_for_review(paper_text)
     return (
         "당신은 L2/EFL 읽기 논문을 한국 영어리딩 학원 학부모를 위해 구조화하는 연구 보조자이다.\n"
         "아래 PDF 발췌만 근거로 JSON 필드를 채워라. 발췌에 없는 수치·표본·효과크기는 "
@@ -230,7 +257,7 @@ def education_prompt(meta: dict, paper_text: str) -> str:
         f"학술지: {meta.get('venue') or ''}\n"
         f"DOI: {meta.get('doi') or ''}\n"
         f"파일럿 하위주제(서지 라벨, 결과로 단정하지 말 것): {meta.get('subtopic') or ''}\n\n"
-        f"본문 발췌:\n{paper_text[:12000]}\n"
+        f"본문 발췌:\n{excerpt}\n"
     )
 
 
