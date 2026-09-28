@@ -9,7 +9,7 @@
   },
   "unpaywall_email": "your.email@example.com",
   "_comment_search_keywords": "search_keywords 는 토픽별 Core-1 검색 키워드입니다. primary 는 핵심 키워드(매칭 0.5점), secondary 는 보조 키워드(매칭 0.2점). ai4s/scisci/literacy 는 빌트인 기본값이 있어 생략 가능하고, 그 외 신규 토픽은 여기에 추가해야 합니다.",
-  "_comment_llm": "llm.provider 기본값은 anthropic 입니다. literacy 파일럿은 provider를 gemini로 두고 GOOGLE_API_KEY를 환경변수로만 넣습니다. 키를 이 파일에 적지 마세요. review_model/timeline_model/summary_model 기본값은 gemini-2.5-flash 입니다. review_profiles.literacy=education 은 참여자·설계·효과크기·한계·학부모 시사점(근거 강도, 성적 보장 금지) 템플릿입니다.",
+  "_comment_llm": "llm.provider 기본값은 anthropic 입니다. 키는 환경변수로만 넣고 이 파일에 적지 마세요. literacy 파일럿의 Anthropic 실행은 review_model=claude-sonnet-5, timeline_model=claude-sonnet-5 (Opus 대신), summary_model=claude-haiku-4-5-20251001 입니다. Gemini 임베딩은 GEMINI_API_KEY가 유효할 때만 쓰고, 없으면 BM25입니다. review_profiles.literacy=education 은 참여자·설계·효과크기·한계·학부모 시사점(근거 강도, 성적 보장 금지) 템플릿입니다.",
   "llm": {
     "provider": "anthropic"
   },

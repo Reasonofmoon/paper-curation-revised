@@ -83,11 +83,17 @@ def _call_with_invariant_gate(prompt, model, max_tokens, label, client,
                     max_output_tokens=max_tokens,
                 )
             else:
+                from lib.usage_log import abort_if_over, projected_usd, record
+                est_in = max(1, len(local_prompt) // 3)
+                abort_if_over(
+                    3.0, projected_usd(model, est_in, max_tokens), step="category_summary",
+                )
                 resp = client.messages.create(
                     model=model,
                     max_tokens=max_tokens,
                     messages=[{"role": "user", "content": local_prompt}],
                 )
+                record("category_summary", model, getattr(resp, "usage", None), note=label)
                 text = _anthropic_text(resp)
             if text and text[-1] not in ".다":
                 text += "."

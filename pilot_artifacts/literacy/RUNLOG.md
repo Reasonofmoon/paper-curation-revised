@@ -77,3 +77,33 @@ ingest는 페이지 상한을 80으로 올린 뒤 한 번 더 돌려, 44쪽짜�
 - 교육 리뷰 템플릿과 보장 표현 제거.
 - `--bm25-only`는 임베딩 API를 호출하지 않는다.
 - `literacy/`를 `docs/.assetsignore`에 넣어 로컬 전용으로 둔다.
+
+## Anthropic 실행 (2026-09-28) — 호출 전 견적
+
+이번 실행은 Gemini가 아니라 파이프라인 기본 Anthropic provider다. `config.json`의 `llm.provider=anthropic` (로컬, gitignore, 키 없음).
+
+### 키 게이트
+
+- `ANTHROPIC_API_KEY`: 있음. `claude-sonnet-5`, `max_tokens=16` Messages 호출 HTTP 200. input 16, output 4.
+- 요약 모델 확인: `claude-haiku-4-5-20251001`, `max_tokens=16` HTTP 200. input 14, output 4.
+- `GEMINI_API_KEY`: 없음. `GOOGLE_API_KEY`: 없음. Gemini 호출은 하지 않았다. 검색 인덱스는 `--bm25-only`.
+
+### 모델
+
+- 리뷰: `claude-sonnet-5` (기본값. Opus 아님)
+- 타임라인: 코드 기본은 `claude-opus-5`. Opus-class라 `claude-sonnet-5`로 바꿨다. `TIMELINE_MAX_OUTPUT_TOKENS=4000`
+- 카테고리 요약: `claude-haiku-4-5-20251001`
+- 단가 (README, 2026-09-01 이후): Sonnet $3 / $15 per 1M, Haiku $1 / $5 per 1M
+
+### 예상 비용 (step 1 이전)
+
+| 단계 | 입력 | 출력(예상) | 예상 USD | 상한 USD |
+|------|------|------------|----------|----------|
+| 키 게이트 | 30 | 8 | 0.0001 | 0.0001 |
+| 리뷰 22편 | 214,869 (count_tokens 실측) | 2,000×22 | 1.30 | 1.97 (max_tokens 4000) |
+| 카테고리 요약 | ~6천 | ~5천 | 0.05 | 0.15 |
+| 타임라인 8회 (상한 4000) | ~2만 | ~1.6만 예상 / 3.2만 상한 | 0.30 | 0.54 |
+| Deep Research 2문항 | ~6천 | ~2천 | 0.05 | 0.08 |
+| 검색 임베딩 | — | — | 0 (BM25) | 0 |
+
+예상 합계 약 **$1.75**. 상한 약 **$2.74**. $3 미만이라 진행한다. 각 호출 직전 `usage_log.abort_if_over`가 누적+해당 호출 상한이 $3을 넘으면 그 호출을 하지 않는다.

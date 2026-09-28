@@ -296,22 +296,34 @@ def write_education_review(item: dict, slug_dir: str, figures=None) -> bool:
                 prompt, EDUCATION_JSON_SCHEMA, model=model, max_output_tokens=4000,
             )
     else:
-        model = os.environ.get("WRITE_REVIEW_MODEL", "claude-sonnet-5")
+        model = os.environ.get("WRITE_REVIEW_MODEL") or settings["review_model"] or "claude-sonnet-5"
+        if "opus" in model.lower():
+            model = "claude-sonnet-5"
 
         def _make_call():
             from anthropic import Anthropic
+            from lib.usage_log import abort_if_over, projected_usd, record
             client = Anthropic(timeout=180.0, max_retries=4)
             tool = {
                 "name": "emit_review",
                 "description": "Emit the education-research review fields.",
                 "input_schema": EDUCATION_JSON_SCHEMA,
             }
+            max_tokens = 4000
+            est_in = max(1, len(prompt) // 2)
+            abort_if_over(
+                3.0, projected_usd(model, est_in, max_tokens), step="review",
+            )
             response = client.messages.create(
                 model=model,
-                max_tokens=4000,
+                max_tokens=max_tokens,
                 tools=[tool],
                 tool_choice={"type": "tool", "name": "emit_review"},
                 messages=[{"role": "user", "content": prompt}],
+            )
+            record(
+                "review", model, getattr(response, "usage", None),
+                note=os.path.basename(slug_dir.rstrip("/\\")),
             )
             for block in response.content:
                 if getattr(block, "type", None) == "tool_use" \

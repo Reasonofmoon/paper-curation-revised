@@ -1,14 +1,16 @@
 """Answer a Deep Research question from the local search index.
 
 Default retrieval is BM25 and does not call an embedding API. The answer
-step uses Gemini only when ``GOOGLE_API_KEY`` is set and ``--retrieve-only``
-is absent. With no key this script writes the retrieved passages and exits
-2, unless ``--retrieve-only`` is set (exit 0, no answer invented).
+step follows ``llm.provider``: Gemini when that provider is selected and
+``GOOGLE_API_KEY`` is set, otherwise Anthropic (``claude-sonnet-5`` when the
+configured model is Opus-class). ``--retrieve-only`` writes passages and
+does not call a model.
 """
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -117,6 +119,39 @@ def answer_with_gemini(question: str, papers: list[dict], model: str) -> str:
     )
 
 
+def _sonnet_model(model: str) -> str:
+    if not model or "opus" in model.lower():
+        return "claude-sonnet-5"
+    return model
+
+
+def answer_with_anthropic(question: str, papers: list[dict], model: str) -> str:
+    """Korean parent-facing answer. Citations must be the retrieved [N] ids."""
+    from anthropic import Anthropic
+    from lib.usage_log import abort_if_over, projected_usd, record
+
+    model = _sonnet_model(model)
+    prompt = _answer_prompt(question, papers)
+    max_tokens = 1600
+    est_in = max(1, len(prompt) // 2)
+    abort_if_over(3.0, projected_usd(model, est_in, max_tokens), step="deep_research")
+    client = Anthropic(timeout=180.0, max_retries=4)
+    response = client.messages.create(
+        model=model,
+        max_tokens=max_tokens,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    record("deep_research", model, getattr(response, "usage", None), note=question[:80])
+    parts = []
+    for block in response.content:
+        if getattr(block, "type", None) == "text" and getattr(block, "text", None):
+            parts.append(block.text)
+    text = "".join(parts).strip()
+    if not text:
+        raise RuntimeError("Anthropic deep research answer had no text")
+    return text
+
+
 def run(topic: str, question: str, *, top_k: int, out: Path | None,
         retrieve_only: bool) -> int:
     result = query_search_index(topic, question, top_k=top_k, mode="bm25")
@@ -124,27 +159,29 @@ def run(topic: str, question: str, *, top_k: int, out: Path | None,
     answer = None
     blocked = None
     code = 0
+    settings = get_llm_settings()
     if retrieve_only:
         blocked = (
-            "RETRIEVE-ONLY. Gemini 답변을 호출하지 않았다. "
-            "GOOGLE_API_KEY를 설정한 뒤 `--retrieve-only` 없이 같은 명령을 실행하면 "
-            "위 [N] 논문만 인용하는 답변이 생성된다."
+            "RETRIEVE-ONLY. 답변 모델을 호출하지 않았다. "
+            "`--retrieve-only` 없이 같은 명령을 실행하면 위 [N] 논문만 인용하는 답변이 생성된다."
         )
-    elif not get_google_key():
-        blocked = (
-            "BLOCKED: GOOGLE_API_KEY가 없어 Gemini 답변을 호출하지 않았다. "
-            "검색 구절만 저장했다."
-        )
-        code = 2
-    else:
-        settings = get_llm_settings()
-        if settings["provider"] != "gemini":
+    elif settings["provider"] == "gemini":
+        if not get_google_key():
             blocked = (
-                "BLOCKED: llm.provider가 gemini가 아니다. Anthropic 답변은 호출하지 않았다."
+                "BLOCKED: GOOGLE_API_KEY가 없어 Gemini 답변을 호출하지 않았다. "
+                "검색 구절만 저장했다."
             )
             code = 2
         else:
             answer = answer_with_gemini(question, papers, settings["review_model"])
+    elif not os.environ.get("ANTHROPIC_API_KEY"):
+        blocked = (
+            "BLOCKED: ANTHROPIC_API_KEY가 없어 Anthropic 답변을 호출하지 않았다. "
+            "검색 구절만 저장했다."
+        )
+        code = 2
+    else:
+        answer = answer_with_anthropic(question, papers, settings["review_model"])
     text = format_retrieval_markdown(question, result, papers, answer, blocked)
     if out:
         out.parent.mkdir(parents=True, exist_ok=True)
