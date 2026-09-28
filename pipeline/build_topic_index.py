@@ -69,6 +69,10 @@ def _run_topic_index(topic=None, cross=None):
             "gradient": "linear-gradient(135deg, #0d1a2a 0%, #14385c 50%, #1866A6 100%)",
             "accent": "#2374D6", "accent_dark": "#1856A0", "accent_light": "#50A0F0",
         },
+        "literacy": {
+            "gradient": "linear-gradient(135deg, #0d2418 0%, #145c32 50%, #1a7a45 100%)",
+            "accent": "#1F9D55", "accent_dark": "#147A40", "accent_light": "#5DCAA0",
+        },
     }
     # Default theme for unknown topics
     _default_theme = {

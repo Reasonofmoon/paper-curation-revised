@@ -79,25 +79,49 @@ def category_input_hash(papers):
 # ═══════════════════════════════════════════
 
 def opus_streaming_call(prompt, max_tokens=12000):
-    """Opus streaming 호출. SDK retry는 request-level만 처리하므로 mid-stream
-    Connection reset/ReadError를 잡아서 수동 retry (exp backoff)."""
+    """Narrative 호출. llm.provider=gemini 이면 Gemini 텍스트, 아니면 Claude streaming.
+
+    Opus-class timeline models are replaced with ``claude-sonnet-5`` so a
+    small pilot cannot spend Opus output rates. ``TIMELINE_MAX_OUTPUT_TOKENS``
+    caps the request. SDK retry는 request-level만 처리하므로 mid-stream
+    Connection reset/ReadError를 잡아서 수동 retry (exp backoff).
+    """
+    from config_loader import get_llm_settings
+    settings = get_llm_settings()
+    if settings["provider"] == "gemini":
+        from lib.gemini_llm import gemini_generate_text
+        log(f"    [gemini] timeline narrative via {settings['timeline_model']}")
+        return gemini_generate_text(
+            prompt, model=settings["timeline_model"], max_output_tokens=max_tokens,
+        )
+    model = settings.get("timeline_model") or "claude-sonnet-5"
+    if "opus" in model.lower():
+        log("    [cost] timeline model is Opus-class; using claude-sonnet-5")
+        model = "claude-sonnet-5"
+    cap = os.environ.get("TIMELINE_MAX_OUTPUT_TOKENS", "").strip()
+    if cap.isdigit():
+        max_tokens = min(max_tokens, int(cap))
     import time as _time
     from anthropic import Anthropic
+    from lib.usage_log import abort_if_over, projected_usd, record
     client = Anthropic(timeout=600.0, max_retries=4)
+    est_in = max(1, len(prompt) // 3)
+    abort_if_over(3.0, projected_usd(model, est_in, max_tokens), step="timeline")
 
     last_err = None
     for attempt in range(5):
         try:
             text = ""
-            # Opus 5 uses adaptive thinking and rejects an explicit `temperature` —
-            # the API returns 400 "`temperature` is deprecated for this model."
+            # Opus/Sonnet 5 reject an explicit `temperature`.
             with client.messages.stream(
-                model="claude-opus-5",
+                model=model,
                 max_tokens=max_tokens,
                 messages=[{"role": "user", "content": prompt}],
             ) as stream:
                 for chunk in stream.text_stream:
                     text += chunk
+                final = stream.get_final_message()
+            record("timeline", model, getattr(final, "usage", None), note="narrative")
             return text
         except Exception as e:
             last_err = e
@@ -765,6 +789,10 @@ def select_best_candidate(results, caption=""):
     if not results:
         return None
     if len(results) == 1:
+        return results[0]
+    from config_loader import get_llm_settings
+    if get_llm_settings()["provider"] == "gemini":
+        log("     [judge] provider=gemini — Anthropic vision judge skipped; first candidate kept")
         return results[0]
     try:
         import base64

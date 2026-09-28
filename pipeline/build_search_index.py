@@ -151,6 +151,9 @@ except ImportError:
 SECTIONS_TO_INDEX = [
     "Essence", "Motivation", "How", "Achievement", "Originality",
     "Limitation", "Evaluation",
+    # Education-research profile (literacy). Absent headings are skipped.
+    "연구 질문과 배경", "참여자", "연구 설계", "주요 결과와 효과크기",
+    "한계", "학부모 시사점", "근거 인용",
 ]
 
 # Evaluation 섹션의 점수 루브릭 줄("- Novelty: 4/5" 등)은 거의 모든
@@ -611,6 +614,29 @@ def _text_windows(t, size=1400, overlap=200):
     return out
 
 
+def select_text_windows(text: str) -> list:
+    """High-signal windows, or the opening windows when the ML lexicon misses.
+
+    Education PDFs often lack "benchmark/ablation" wording. Returning nothing
+    would make a BM25 index unable to see the abstract. The fallback runs
+    only when every window scores below the threshold, so existing ML papers
+    keep the same ranking.
+    """
+    body = text or ""
+    m = _TXT_REF_RE.search(body)
+    if m:
+        body = body[:m.start()]
+    scored = []
+    for w in _text_windows(body):
+        s = len(_TXT_SIGNAL.findall(w)) + 0.5 * len(_TXT_NUM.findall(w))
+        if s >= 3:
+            scored.append((s, w))
+    scored.sort(key=lambda x: -x[0])
+    if not scored:
+        scored = [(0, w) for w in _text_windows(body)[:TEXTMD_MAX_CHUNKS]]
+    return [w for _, w in scored]
+
+
 def textmd_high_signal_chunks(slug: str) -> list:
     """text.md 의 References 이전 본문에서 method/experiment/수치 밀도 상위 윈도우만 추출."""
     p = PAPERS_DIR / slug / "text.md"
@@ -620,15 +646,7 @@ def textmd_high_signal_chunks(slug: str) -> list:
         t = p.read_text(encoding="utf-8", errors="ignore")
     except Exception:
         return []
-    m = _TXT_REF_RE.search(t)
-    if m:
-        t = t[:m.start()]
-    scored = []
-    for w in _text_windows(t):
-        s = len(_TXT_SIGNAL.findall(w)) + 0.5 * len(_TXT_NUM.findall(w))
-        if s >= 3:
-            scored.append((s, w))
-    scored.sort(key=lambda x: -x[0])
+    scored = [(0, w) for w in select_text_windows(t)]
     out, total = [], 0
     for _, w in scored[:TEXTMD_MAX_CHUNKS]:
         c = clean_chunk_text(w)[:MAX_CHUNK_CHARS]
@@ -650,7 +668,11 @@ def is_local_topic(topic: str) -> bool:
 
 
 def build_index(topic: str, model: str, limit: int | None, dry_run: bool,
-                include_text: str = "auto"):
+                include_text: str = "auto", bm25_only: bool = False):
+    if bm25_only:
+        # Zero-vector sidecar keeps the file shape. Dense scores are not meaningful.
+        model = "bm25-only"
+        dry_run = True
     topic_dir = get_topic_dir(topic)
     if not topic_dir.exists():
         print(f"ERROR: topic dir {topic_dir} does not exist")
@@ -825,7 +847,8 @@ def build_index(topic: str, model: str, limit: int | None, dry_run: bool,
 
     # --- Embed (cache misses only) ---
     if dry_run:
-        print("[3/4] --dry-run: zero-vectors for cache misses")
+        label = "--bm25-only" if model == "bm25-only" else "--dry-run"
+        print(f"[3/4] {label}: zero-vectors for cache misses (no embedding API call)")
         for c in miss_chunks:
             qbytes = quantize_int8_l2([0.0] * 768)
             sha_to_emb[c["text_sha"]] = base64.b64encode(qbytes).decode("ascii")
@@ -936,6 +959,12 @@ def build_index(topic: str, model: str, limit: int | None, dry_run: bool,
         "papers": papers_meta,
         "chunks": out_chunks,
     }
+    if model == "bm25-only":
+        out["dense_embeddings"] = False
+        out["note"] = (
+            "BM25 text index. Embedding bytes are zero placeholders, "
+            "not gemini-embedding-001."
+        )
     source_fp, source_count = source_fingerprint(topic, papers_meta)
     out["source_fingerprint"] = source_fp
     out["source_file_count"] = source_count
@@ -962,23 +991,32 @@ def build_index(topic: str, model: str, limit: int | None, dry_run: bool,
 
 
 def _run_search_index(topic, *, model="gemini-embedding-001", limit=None, dry_run=False,
-                      include_text="auto"):
+                      include_text="auto", bm25_only=False):
     """Programmatic entrypoint for build_search_index."""
-    return build_index(topic, model, limit, dry_run, include_text=include_text)
+    return build_index(topic, model, limit, dry_run, include_text=include_text,
+                       bm25_only=bm25_only)
 
 
-def main():
+def build_parser():
     parser = argparse.ArgumentParser(description="Build Deep Research search index")
     parser.add_argument("--topic", required=True, help="topic alias (e.g. ai4s, scisci)")
     parser.add_argument("--model", default="gemini-embedding-001")
     parser.add_argument("--limit", type=int, default=None, help="limit number of papers (debug)")
     parser.add_argument("--dry-run", action="store_true", help="chunk only, no API calls")
+    parser.add_argument("--bm25-only", action="store_true",
+                        help="Write chunk text for BM25 and zero-vector placeholders. "
+                             "Does not call the Gemini embedding API.")
     parser.add_argument("--include-text", choices=["auto", "yes", "no"], default="auto",
                         help="text.md 고신호 청크 보강. auto=로컬 토픽만 ON(클라우드 review-only). "
                              "yes 는 배포 토픽에 거부됨(저작권).")
-    args = parser.parse_args()
+    return parser
+
+
+def main():
+    args = build_parser().parse_args()
     _run_search_index(topic=args.topic, model=args.model, limit=args.limit,
-                      dry_run=args.dry_run, include_text=args.include_text)
+                      dry_run=args.dry_run or args.bm25_only,
+                      include_text=args.include_text, bm25_only=args.bm25_only)
 
 
 if __name__ == "__main__":

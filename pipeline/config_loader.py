@@ -266,6 +266,38 @@ _DEFAULT_SEARCH_KEYWORDS = {
             "science mapping",
         ],
     },
+    "literacy": {
+        "primary": [
+            "second language reading",
+            "EFL reading comprehension",
+            "extensive reading",
+            "graded readers",
+            "incidental vocabulary acquisition reading",
+            "phonics instruction",
+            "reading motivation",
+            "home literacy environment",
+            "family literacy program",
+            "shared book reading",
+        ],
+        "secondary": [
+            "reading fluency",
+            "reading-while-listening",
+            "morphological awareness",
+            "simple view of reading",
+            "Korean EFL learners",
+            "parental involvement reading",
+            "decoding intervention",
+            "vocabulary knowledge reading comprehension",
+            "paper versus screen reading",
+            "young learners English",
+        ],
+    },
+}
+
+# Topic → review markdown profile. "education" is the L2/EFL parent-facing
+# template. Unknown topics stay on the STEM review.
+_DEFAULT_REVIEW_PROFILES = {
+    "literacy": "education",
 }
 
 
@@ -312,6 +344,61 @@ def get_search_keywords(topic):
         f"  - secondary: 보조 키워드 (매칭 0.2점)\n\n"
         f"{example_block}"
     )
+
+
+def get_llm_settings():
+    """LLM provider switch.
+
+    ``llm.provider`` in config.json, overridden by ``PAPER_CURATION_LLM_PROVIDER``.
+    Default is ``anthropic`` so existing topics keep their current calls.
+    ``gemini`` routes review, timeline narrative, and category-summary text
+    through ``pipeline/lib/gemini_llm.py`` and requires ``GOOGLE_API_KEY``.
+    """
+    cfg = load_config()
+    llm = cfg.get("llm") or {}
+    provider = (
+        os.environ.get("PAPER_CURATION_LLM_PROVIDER")
+        or llm.get("provider")
+        or "anthropic"
+    ).strip().lower()
+    if provider not in ("anthropic", "gemini"):
+        raise ValueError(
+            f"llm.provider must be 'anthropic' or 'gemini', got {provider!r}"
+        )
+    gemini = provider == "gemini"
+    if gemini:
+        review_model = llm.get("review_model") or "gemini-2.5-flash"
+        timeline_model = llm.get("timeline_model") or "gemini-2.5-flash"
+        summary_model = llm.get("summary_model") or "gemini-2.5-flash"
+    else:
+        review_model = os.environ.get("WRITE_REVIEW_MODEL") or llm.get("review_model") or "claude-sonnet-5"
+        timeline_model = llm.get("timeline_model") or "claude-opus-5"
+        summary_model = llm.get("summary_model") or "claude-haiku-4-5-20251001"
+    return {
+        "provider": provider,
+        "review_model": review_model,
+        "timeline_model": timeline_model,
+        "summary_model": summary_model,
+    }
+
+
+def get_review_profile(topic=None, item=None):
+    """``education`` for the literacy template, otherwise ``stem``.
+
+    An item may force ``_review_profile``. Otherwise the topic (argument,
+    then ``PAPER_CURATION_TOPIC``) is looked up in config ``review_profiles``
+    and the built-in literacy default.
+    """
+    if item and item.get("_review_profile"):
+        return item["_review_profile"]
+    topic = topic or os.environ.get("PAPER_CURATION_TOPIC") or ""
+    configured = load_config().get("review_profiles") or {}
+    if topic and topic in configured:
+        return configured[topic]
+    if topic in _DEFAULT_REVIEW_PROFILES:
+        return _DEFAULT_REVIEW_PROFILES[topic]
+    explicit = (load_config().get("llm") or {}).get("review_profile")
+    return explicit or "stem"
 
 
 def get_paperbanana_dir():
