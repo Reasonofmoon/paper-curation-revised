@@ -605,7 +605,9 @@ def convert_review(md_path, topic, slug_dir):
     # Strip Related Papers section (auto-generated for Obsidian)
     md = re.sub(r'\n## Related Papers\n[\s\S]*?(?=\n## |\Z)', '', md)
 
-    theme = THEMES.get(topic, THEMES["ai4s"])
+    theme = dict(THEMES.get(topic, THEMES["ai4s"]))
+    if topic not in THEMES:
+        theme["back_href"] = f"../../{topic}/index.html"
 
     # Extract title
     title_m = re.search(r'^#\s+(.+)', md, re.MULTILINE)

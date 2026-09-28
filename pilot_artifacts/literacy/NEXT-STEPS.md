@@ -1,4 +1,8 @@
-# literacy 파일럿 — GOOGLE_API_KEY 이후 실행 순서
+# literacy 파일럿 — 다음 단계
+
+2026-09-28 Anthropic 실행은 끝났다. 리뷰·카테고리 요약·타임라인 서술·Deep Research 답변은 `claude-sonnet-5`(요약만 Haiku)다. `GEMINI_API_KEY`가 없어 검색은 BM25다. 비용은 `usage.md` ($2.16). 아래 Gemini 절차는 임베딩을 붙일 때만 쓴다.
+
+# literacy 파일럿 — GOOGLE_API_KEY 이후 실행 순서 (보류)
 
 이번 브랜치(`pilot/literacy`)는 포크 `Reasonofmoon/paper-curation-revised`의 `master` `4536c043`에서 시작했다. 업스트림 `jehyunlee/paper-curation`은 fetch/merge/push/PR 하지 않았다. 배포, GitHub Pages, wrangler, Cloudflare, 메일은 사용하지 않는다.
 

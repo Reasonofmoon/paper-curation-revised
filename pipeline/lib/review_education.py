@@ -261,12 +261,40 @@ def education_prompt(meta: dict, paper_text: str) -> str:
     )
 
 
+_PARAM_RE = re.compile(
+    r'<parameter name="([a-z_]+)">(.*?)</(?:parameter|\1)>',
+    re.S,
+)
+
+
+def _unwrap_embedded_parameters(data: dict) -> dict:
+    """Some tool calls dump every field into ``essence`` as XML. Split them back."""
+    if not isinstance(data, dict):
+        return {}
+    out = dict(data)
+    essence = out.get("essence") if isinstance(out.get("essence"), str) else ""
+    if "<parameter" not in essence and "</essence>" not in essence:
+        return out
+    head, sep, _rest = essence.partition("</essence>")
+    if sep:
+        out["essence"] = head.strip()
+    for name, value in _PARAM_RE.findall(essence):
+        if name not in EDUCATION_JSON_SCHEMA["required"] or name == "essence":
+            continue
+        current = out.get(name)
+        if not isinstance(current, str) or not current.strip() or current.strip() == NOT_IN_TEXT:
+            out[name] = value.strip()
+    return out
+
+
 def normalize_education_fields(data: dict) -> dict:
+    data = _unwrap_embedded_parameters(data)
     out = {}
     for key in EDUCATION_JSON_SCHEMA["required"]:
         value = data.get(key) if isinstance(data, dict) else None
         if not isinstance(value, str) or not value.strip():
             value = NOT_IN_TEXT
+        value = value.replace("</invoke>", "").strip()
         out[key] = value.strip()
     out["parent_implications"] = ensure_evidence_label(
         scrub_guarantees(out["parent_implications"])

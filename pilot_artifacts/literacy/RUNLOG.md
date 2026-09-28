@@ -107,3 +107,24 @@ ingest는 페이지 상한을 80으로 올린 뒤 한 번 더 돌려, 44쪽짜�
 | 검색 임베딩 | — | — | 0 (BM25) | 0 |
 
 예상 합계 약 **$1.75**. 상한 약 **$2.74**. $3 미만이라 진행한다. 각 호출 직전 `usage_log.abort_if_over`가 누적+해당 호출 상한이 $3을 넘으면 그 호출을 하지 않는다.
+
+## Anthropic 실행 결과
+
+PDF 22편은 git에 없으므로 `/tmp/pilot-inputs/pdfs`에 풀고, 유료 호출 전에 `ingest_pdf_folder.py`로 `text.md`만 다시 만들었다. 논문 03(IJALEL)은 DOI 랜딩에 PDF가 없어 다시 skip.
+
+| 단계 | 상태 |
+|------|------|
+| 리뷰 22편 `claude-sonnet-5` | 완료. 22/22 `review_status: anthropic:claude-sonnet-5` |
+| 008 XML이 essence 한 칸에 들어옴 | 캐시를 다시 읽어 필드를 나누어 재작성. 추가 호출 없음 |
+| `build_papers_index.py` | 22편, essence 22 |
+| `classify_bib_subtopic.py` | 6범주, LLM 없음. 이 단계가 요약·타임라인 JSON을 덮어씀 |
+| `build_category_summaries.py` | Haiku 6호출, 품질 검사 통과 |
+| `generate_timelines.py --narrative-only` | Sonnet. `TIMELINE_MAX_OUTPUT_TOKENS=4000`. 이미지 없음. 일부 카테고리 JSON이 출력 한도에서 잘려, 한글 카테고리 요약으로 executive summary만 한 번 더 생성 |
+| 검색 | `GEMINI_API_KEY` 없음. `--bm25-only`. 청크 275 |
+| Deep Research 2문항 | Sonnet. 첫 답은 1600토큰에서 문장이 잘려 2200으로 재생성. 질문 2가 SPIRE를 싱가포르로 잘못 적어, 본문(말레이시아 멜라카)에 맞게 그 한 구절만 고침 |
+| 정적 사이트 | `review_to_html` 22, `build_topic_index`. 키 환경변수를 빼고 빌드. HTML에 API 키 값은 없다. literacy 리뷰의 뒤로가기는 `../../literacy/index.html` |
+| 로컬 서버 | `serve_local.py --port 8765` HTTP 200 |
+
+실측 합계는 `usage.md`: 입력 250,987 + 출력 95,598 토큰, **$2.16**. $3 상한 안에서 끝났다.
+
+배포, wrangler, Cloudflare, GitHub Pages, 메일, Zotero API, 업스트림 `jehyunlee/paper-curation` push/PR은 하지 않았다.

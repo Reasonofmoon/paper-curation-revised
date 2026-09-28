@@ -104,9 +104,10 @@ def _answer_prompt(question: str, papers: list[dict]) -> str:
     context = "\n\n".join(blocks)
     return (
         "너는 영어리딩 학원 학부모를 위한 연구 보조자다. 아래 검색 발췌만 근거로 한국어로 답하라.\n"
+        "분량은 900~1400자. 마지막은 반드시 완결된 문장으로 끝내라.\n"
         "주장마다 발췌 번호 [N]을 붙여라. 목록에 없는 논문 번호는 쓰지 마라.\n"
         "발췌에 없는 효과크기나 표본 수는 추정하지 말고 '발췌에서 확인되지 않음'이라고 써라.\n"
-        "합격, 입학, 점수, 등급을 보장하지 마라. 근거가 약하면 그렇게 말해라.\n\n"
+        "합격, 입학, 점수, 등급을 보장하지 마라. 근거 강도를 한 문장으로 밝혀라.\n\n"
         f"질문: {question}\n\n"
         f"발췌:\n{context}\n"
     )
@@ -132,7 +133,7 @@ def answer_with_anthropic(question: str, papers: list[dict], model: str) -> str:
 
     model = _sonnet_model(model)
     prompt = _answer_prompt(question, papers)
-    max_tokens = 1600
+    max_tokens = 2200
     est_in = max(1, len(prompt) // 2)
     abort_if_over(3.0, projected_usd(model, est_in, max_tokens), step="deep_research")
     client = Anthropic(timeout=180.0, max_retries=4)
